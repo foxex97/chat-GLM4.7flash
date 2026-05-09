@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLM-4-Flash API Tester</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-950 text-white h-screen flex flex-col items-center justify-center p-4">
+    
+    <div class="w-full max-w-2xl bg-zinc-900 rounded-xl shadow-2xl border border-zinc-800 flex flex-col overflow-hidden">
+        
+        <!-- Header -->
+        <header class="bg-zinc-800 p-4 border-b border-zinc-700 flex justify-between items-center">
+            <div>
+                <h1 class="text-lg font-bold font-mono text-sky-400">GLM Flash Tester</h1>
+                <p class="text-xs text-zinc-400">Seamless Single-File Interface</p>
+            </div>
+            <select id="modelSelect" class="bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-xs focus:outline-none">
+                <option value="glm-4-flash">GLM-4-Flash</option>
+                <option value="glm-4">GLM-4</option>
+                <option value="glm-5.1">GLM-5.1</option>
+            </select>
+        </header>
+
+        <!-- Chat Output -->
+        <main id="chatWindow" class="flex-1 h-96 overflow-y-auto p-6 space-y-4 bg-zinc-950/50 font-mono text-sm">
+            <div class="text-zinc-500 italic">Response will stream here...</div>
+        </main>
+
+        <!-- Input Area -->
+        <footer class="p-4 border-t border-zinc-800 bg-zinc-900">
+            <form id="chatForm" class="flex gap-3">
+                <input 
+                    type="text" 
+                    id="userInput" 
+                    placeholder="Type a prompt..." 
+                    class="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    autocomplete="off"
+                >
+                <button 
+                    type="submit" 
+                    id="sendBtn"
+                    class="px-6 py-2 bg-sky-500 hover:bg-sky-600 rounded-lg font-semibold transition-colors disabled:opacity-50"
+                >
+                    Send
+                </button>
+            </form>
+        </footer>
+    </div>
+
+    <script>
+        const form = document.getElementById('chatForm');
+        const input = document.getElementById('userInput');
+        const window = document.getElementById('chatWindow');
+        const modelSelect = document.getElementById('modelSelect');
+        const sendBtn = document.getElementById('sendBtn');
+
+        // Clear initial placeholder on first load
+        window.innerHTML = '';
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const text = input.value.trim();
+            if (!text) return;
+
+            // 1. UI Setup: Disable input, show user message
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Running...';
+            
+            // Add user bubble
+            window.innerHTML += `<div class="text-right text-sky-300 mb-2">> ${text}</div>`;
+            
+            // Add empty bot bubble for streaming
+            const botDiv = document.createElement('div');
+            botDiv.className = 'text-zinc-200 mb-4 whitespace-pre-wrap';
+            window.appendChild(botDiv);
+            
+            // Scroll to bottom
+            window.scrollTop = window.scrollHeight;
+
+            // 2. Call our internal API (api/chat.js)
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: modelSelect.value,
+                        messages: [{ role: 'user', content: text }]
+                    })
+                });
+
+                // 3. Read the stream
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    // Parse SSE chunks (data: {...})
+                    const lines = chunk.split('\n').filter(line => line.startsWith('data:'));
+
+                    for (const line of lines) {
+                        const jsonStr = line.replace('data: ', '');
+                        if (jsonStr === '[DONE]') continue;
+                        
+                        try {
+                            const data = JSON.parse(jsonStr);
+                            const content = data.choices?.[0]?.delta?.content;
+                            if (content) {
+                                botDiv.textContent += content;
+                                window.scrollTop = window.scrollHeight; // Auto-scroll
+                            }
+                        } catch (err) {
+                            // Ignore parsing errors for malformed chunks
+                        }
+                    }
+                }
+
+            } catch (err) {
+                botDiv.innerHTML = `<span class="text-red-500">Error: ${err.message}</span>`;
+            } finally {
+                // 4. Reset UI
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Send';
+                input.value = '';
+                input.focus();
+            }
+        });
+    </script>
+</body>
+</html>

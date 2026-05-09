@@ -1,134 +1,101 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GLM-4-Flash API Tester</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-zinc-950 text-white h-screen flex flex-col items-center justify-center p-4">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Z.ai Chat</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
     
-    <div class="w-full max-w-2xl bg-zinc-900 rounded-xl shadow-2xl border border-zinc-800 flex flex-col overflow-hidden">
-        
-        <!-- Header -->
-        <header class="bg-zinc-800 p-4 border-b border-zinc-700 flex justify-between items-center">
-            <div>
-                <h1 class="text-lg font-bold font-mono text-sky-400">GLM Flash Tester</h1>
-                <p class="text-xs text-zinc-400">Seamless Single-File Interface</p>
-            </div>
-            <select id="modelSelect" class="bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-xs focus:outline-none">
-                <option value="glm-4-flash">GLM-4-Flash</option>
-                <option value="glm-4">GLM-4</option>
-                <option value="glm-5.1">GLM-5.1</option>
-            </select>
-        </header>
+    #chat { flex: 1; overflow-y: auto; padding: 20px; }
+    .msg { margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; max-width: 80%; white-space: pre-wrap; word-break: break-word; }
+    .user { background: #1a3a1a; margin-left: auto; }
+    .assistant { background: #1a1a2e; }
+    .error { background: #3a1a1a; color: #ff8888; }
 
-        <!-- Chat Output -->
-        <main id="chatWindow" class="flex-1 h-96 overflow-y-auto p-6 space-y-4 bg-zinc-950/50 font-mono text-sm">
-            <div class="text-zinc-500 italic">Response will stream here...</div>
-        </main>
+    #input-area { display: flex; padding: 12px; gap: 8px; border-top: 1px solid #222; }
+    #input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #333; background: #111; color: #e0e0e0; font-size: 14px; outline: none; }
+    #input:focus { border-color: #444; }
+    #send { padding: 10px 20px; border-radius: 6px; border: none; background: #2a2a4e; color: #e0e0e0; cursor: pointer; font-size: 14px; }
+    #send:hover { background: #3a3a6e; }
+    #send:disabled { opacity: 0.4; cursor: not-allowed; }
+  </style>
+</head>
+<body>
 
-        <!-- Input Area -->
-        <footer class="p-4 border-t border-zinc-800 bg-zinc-900">
-            <form id="chatForm" class="flex gap-3">
-                <input 
-                    type="text" 
-                    id="userInput" 
-                    placeholder="Type a prompt..." 
-                    class="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                    autocomplete="off"
-                >
-                <button 
-                    type="submit" 
-                    id="sendBtn"
-                    class="px-6 py-2 bg-sky-500 hover:bg-sky-600 rounded-lg font-semibold transition-colors disabled:opacity-50"
-                >
-                    Send
-                </button>
-            </form>
-        </footer>
-    </div>
+  <div id="chat"></div>
 
-    <script>
-        const form = document.getElementById('chatForm');
-        const input = document.getElementById('userInput');
-        const window = document.getElementById('chatWindow');
-        const modelSelect = document.getElementById('modelSelect');
-        const sendBtn = document.getElementById('sendBtn');
+  <div id="input-area">
+    <input id="input" type="text" placeholder="Type a message..." autofocus />
+    <button id="send">Send</button>
+  </div>
 
-        // Clear initial placeholder on first load
-        window.innerHTML = '';
+  <script>
+    const chatEl = document.getElementById('chat');
+    const inputEl = document.getElementById('input');
+    const sendBtn = document.getElementById('send');
 
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const text = input.value.trim();
-            if (!text) return;
+    // Conversation history — sent to API each request
+    let messages = [];
 
-            // 1. UI Setup: Disable input, show user message
-            sendBtn.disabled = true;
-            sendBtn.textContent = 'Running...';
-            
-            // Add user bubble
-            window.innerHTML += `<div class="text-right text-sky-300 mb-2">> ${text}</div>`;
-            
-            // Add empty bot bubble for streaming
-            const botDiv = document.createElement('div');
-            botDiv.className = 'text-zinc-200 mb-4 whitespace-pre-wrap';
-            window.appendChild(botDiv);
-            
-            // Scroll to bottom
-            window.scrollTop = window.scrollHeight;
+    function addMessage(role, text) {
+      const div = document.createElement('div');
+      div.className = `msg ${role}`;
+      div.textContent = text;
+      chatEl.appendChild(div);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
 
-            // 2. Call our internal API (api/chat.js)
-            try {
-                const response = await fetch('/api/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        model: modelSelect.value,
-                        messages: [{ role: 'user', content: text }]
-                    })
-                });
+    function setLoading(on) {
+      sendBtn.disabled = on;
+      sendBtn.textContent = on ? '...' : 'Send';
+    }
 
-                // 3. Read the stream
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
+    async function send() {
+      const text = inputEl.value.trim();
+      if (!text) return;
 
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
+      inputEl.value = '';
+      messages.push({ role: 'user', content: text });
+      addMessage('user', text);
+      setLoading(true);
 
-                    const chunk = decoder.decode(value);
-                    // Parse SSE chunks (data: {...})
-                    const lines = chunk.split('\n').filter(line => line.startsWith('data:'));
+      try {
+        console.log('[z.ai] Sending:', JSON.stringify({ messages }));
 
-                    for (const line of lines) {
-                        const jsonStr = line.replace('data: ', '');
-                        if (jsonStr === '[DONE]') continue;
-                        
-                        try {
-                            const data = JSON.parse(jsonStr);
-                            const content = data.choices?.[0]?.delta?.content;
-                            if (content) {
-                                botDiv.textContent += content;
-                                window.scrollTop = window.scrollHeight; // Auto-scroll
-                            }
-                        } catch (err) {
-                            // Ignore parsing errors for malformed chunks
-                        }
-                    }
-                }
-
-            } catch (err) {
-                botDiv.innerHTML = `<span class="text-red-500">Error: ${err.message}</span>`;
-            } finally {
-                // 4. Reset UI
-                sendBtn.disabled = false;
-                sendBtn.textContent = 'Send';
-                input.value = '';
-                input.focus();
-            }
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages })
         });
-    </script>
+
+        const data = await res.json();
+        console.log('[z.ai] Response:', JSON.stringify(data));
+
+        if (!res.ok) {
+          const errMsg = data?.error?.message || data?.msg || JSON.stringify(data);
+          console.error('[z.ai] HTTP', res.status, errMsg);
+          addMessage('error', `Error ${res.status}: ${errMsg}`);
+          // Remove the failed user message from history so they can retry
+          messages.pop();
+        } else {
+          const reply = data.choices?.[0]?.message?.content || '(empty reply)';
+          messages.push({ role: 'assistant', content: reply });
+          addMessage('assistant', reply);
+        }
+      } catch (err) {
+        console.error('[z.ai] Fetch error:', err);
+        addMessage('error', `Network error: ${err.message}`);
+        messages.pop();
+      } finally {
+        setLoading(false);
+        inputEl.focus();
+      }
+    }
+
+    sendBtn.addEventListener('click', send);
+    inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+  </script>
 </body>
 </html>

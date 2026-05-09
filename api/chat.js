@@ -1,5 +1,5 @@
-const API_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
-const MODEL = 'glm-4.7-flash';
+const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const MODEL = 'openai/gpt-oss-120b:free';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -8,8 +8,8 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const apiKey = process.env.ZAI_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'API key not configured' });
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY not configured' });
 
   const { messages } = req.body || {};
   if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: 'messages required' });
@@ -21,25 +21,25 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
+        'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': req.headers.origin || 'http://localhost',
+        'X-Title': 'Z.ai Chat'
       },
       body: JSON.stringify({
         model: MODEL,
         messages,
         stream: true,
-        thinking: { type: 'enabled' },
-        max_tokens: 65536,
-        temperature: 1.0
+        reasoning: { enabled: true }
       })
     });
 
     if (!response.ok) {
       const err = await response.json();
-      console.error('[chat] Z.ai error:', response.status, JSON.stringify(err));
+      console.error('[chat] OpenRouter error:', response.status, JSON.stringify(err));
       return res.status(response.status).json(err);
     }
 
-    // Forward SSE stream to client
+    // Forward SSE stream
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');

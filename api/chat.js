@@ -1,43 +1,21 @@
 const API_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
-const MODEL = 'glm-4.7-flash'; // <-- Fixed: use the model name you specified
+const MODEL = 'glm-4.7-flash';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
-
-  const apiKey = process.env.ZAI_API_KEY;
-  if (!apiKey) {
-    console.error('[api/chat] ZAI_API_KEY env var is not set');
-    return res.status(500).json({ error: 'API key not configured on server' });
-  }
-
-  // Debug endpoint: GET /api/chat?action=models — lists your available models
-  if (req.method === 'GET' && req.query?.action === 'models') {
-    try {
-      const r = await fetch('https://open.bigmodel.cn/api/paas/v4/models', {
-        headers: { 'Authorization': `Bearer ${apiKey}` }
-      });
-      const data = await r.json();
-      console.log('[api/chat] Models list:', JSON.stringify(data));
-      return res.status(200).json(data);
-    } catch (err) {
-      console.error('[api/chat] Models fetch failed:', err);
-      return res.status(500).json({ error: err.message });
-    }
-  }
-
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  const apiKey = process.env.ZAI_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'API key not configured' });
+
   const { messages } = req.body || {};
-  if (!messages || !Array.isArray(messages)) {
-    return res.status(400).json({ error: 'messages array is required' });
-  }
+  if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: 'messages required' });
 
   try {
-    console.log('[api/chat] Forwarding', messages.length, 'messages to Z.ai, model:', MODEL);
+    console.log('[chat] model:', MODEL, 'msgs:', messages.length);
 
     const response = await fetch(API_URL, {
       method: 'POST',
@@ -45,21 +23,40 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
-      body: JSON.stringify({ model: MODEL, messages })
+      body: JSON.stringify({
+        model: MODEL,
+        messages,
+        stream: true,
+        thinking: { type: 'enabled' },
+        max_tokens: 65536,
+        temperature: 1.0
+      })
     });
 
-    const data = await response.json();
-
     if (!response.ok) {
-      console.error('[api/chat] Z.ai error:', response.status, JSON.stringify(data));
-      return res.status(response.status).json(data);
+      const err = await response.json();
+      console.error('[chat] Z.ai error:', response.status, JSON.stringify(err));
+      return res.status(response.status).json(err);
     }
 
-    console.log('[api/chat] Success, usage:', JSON.stringify(data.usage));
-    return res.status(200).json(data);
+    // Forward SSE stream to client
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
 
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(decoder.decode(value, { stream: true }));
+    }
+
+    res.end();
   } catch (err) {
-    console.error('[api/chat] Fetch failed:', err);
-    return res.status(500).json({ error: err.message });
+    console.error('[chat] Failed:', err);
+    if (!res.headersSent) return res.status(500).json({ error: err.message });
+    res.end();
   }
 }

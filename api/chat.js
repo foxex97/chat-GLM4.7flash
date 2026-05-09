@@ -1,24 +1,35 @@
-// Z.ai (Zhipu AI) API proxy — keeps your key server-side
-// Set your key in Vercel: vercel env add ZAI_API_KEY
-// Or replace the fallback below (not recommended for public repos)
-
 const API_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
-const MODEL = 'glm-4-flash'; // Free model — change to 'glm-4.7-flash' if that's the exact name in your dashboard
+const MODEL = 'glm-4.7-flash'; // <-- Fixed: use the model name you specified
 
 export default async function handler(req, res) {
-  // CORS (only needed if testing locally with a different origin)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const apiKey = process.env.ZAI_API_KEY;
   if (!apiKey) {
     console.error('[api/chat] ZAI_API_KEY env var is not set');
     return res.status(500).json({ error: 'API key not configured on server' });
   }
+
+  // Debug endpoint: GET /api/chat?action=models — lists your available models
+  if (req.method === 'GET' && req.query?.action === 'models') {
+    try {
+      const r = await fetch('https://open.bigmodel.cn/api/paas/v4/models', {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      const data = await r.json();
+      console.log('[api/chat] Models list:', JSON.stringify(data));
+      return res.status(200).json(data);
+    } catch (err) {
+      console.error('[api/chat] Models fetch failed:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { messages } = req.body || {};
   if (!messages || !Array.isArray(messages)) {

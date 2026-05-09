@@ -21,7 +21,7 @@ export default async function handler(req, res) {
         'Accept-Language': 'en-US,en'
       },
       body: JSON.stringify({
-        model: req.body.model || 'glm-4-flash',
+        model: req.body.model || 'glm-4.7-flash',
         messages: req.body.messages,
         stream: true
       })

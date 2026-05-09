@@ -75,7 +75,6 @@
       thinkWrap.appendChild(thinkLabel);
       thinkWrap.appendChild(thinkText);
 
-      // Click to toggle thinking
       thinkLabel.addEventListener('click', () => {
         thinkWrap.classList.toggle('collapsed');
         thinkLabel.textContent = thinkWrap.classList.contains('collapsed')
@@ -120,7 +119,7 @@
       let replyContent = '';
 
       try {
-        console.log('[z.ai] Sending:', JSON.stringify({ messages }));
+        console.log('[chat] Sending:', JSON.stringify({ messages }));
 
         const res = await fetch('/api/chat', {
           method: 'POST',
@@ -128,11 +127,10 @@
           body: JSON.stringify({ messages })
         });
 
-        // Non-streaming error
         if (!res.ok && !res.headers.get('content-type')?.includes('text/event-stream')) {
           const err = await res.json();
           const errMsg = err?.error?.message || err?.msg || JSON.stringify(err);
-          console.error('[z.ai] HTTP', res.status, errMsg);
+          console.error('[chat] HTTP', res.status, errMsg);
           thinkWrap.remove();
           contentEl.remove();
           addErrorBubble(`Error ${res.status}: ${errMsg}`);
@@ -140,7 +138,6 @@
           return;
         }
 
-        // Read SSE stream
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -151,7 +148,7 @@
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
-          buffer = lines.pop(); // keep incomplete line
+          buffer = lines.pop();
 
           for (const line of lines) {
             if (!line.startsWith('data: ')) continue;
@@ -163,28 +160,27 @@
               const delta = json.choices?.[0]?.delta;
               if (!delta) continue;
 
-              // Thinking content
-              if (delta.reasoning_content) {
-                thinkingContent += delta.reasoning_content;
+              // OpenRouter reasoning content
+              const reasoningChunk = delta.reasoning_content || delta.reasoning;
+              if (reasoningChunk) {
+                thinkingContent += reasoningChunk;
                 thinkText.textContent = thinkingContent;
                 thinkLabel.textContent = '▾ Thinking';
                 thinkWrap.classList.remove('collapsed');
                 chatEl.scrollTop = chatEl.scrollHeight;
               }
 
-              // Main content
               if (delta.content) {
                 replyContent += delta.content;
                 contentEl.textContent = replyContent;
                 chatEl.scrollTop = chatEl.scrollHeight;
               }
             } catch (e) {
-              console.warn('[z.ai] Parse skip:', data, e);
+              console.warn('[chat] Parse skip:', data);
             }
           }
         }
 
-        // Finalize thinking label
         if (thinkingContent) {
           thinkLabel.textContent = '▸ Thinking (click to expand)';
           thinkWrap.classList.add('collapsed');
@@ -196,13 +192,12 @@
           messages.push({ role: 'assistant', content: replyContent });
         } else {
           contentEl.textContent = '(empty reply)';
-          console.warn('[z.ai] Empty reply content');
         }
 
-        console.log('[z.ai] Done. Thinking length:', thinkingContent.length, 'Reply length:', replyContent.length);
+        console.log('[chat] Done. Thinking:', thinkingContent.length, 'Reply:', replyContent.length);
 
       } catch (err) {
-        console.error('[z.ai] Stream error:', err);
+        console.error('[chat] Stream error:', err);
         thinkWrap.remove();
         contentEl.textContent = '';
         addErrorBubble(`Network error: ${err.message}`);
